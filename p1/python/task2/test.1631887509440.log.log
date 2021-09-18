@@ -1,0 +1,64 @@
+; 2021-09-17T14:05:09+00:00
+; Warmup Test
+; Test launched. Please check every minute for update, for 15 minutes
+[Test]
+type=warmup
+testId=1631887509440
+testFile=test.1631887509440.log
+
+[Minute 1]
+rps=12.84
+
+[Minute 2]
+rps=0
+
+[Minute 3]
+rps=0
+
+[Minute 4]
+rps=0
+
+[Minute 5]
+rps=0
+
+[Minute 6]
+rps=0
+
+[Minute 7]
+rps=0
+
+[Minute 8]
+rps=13.60
+
+[Minute 9]
+rps=10.43
+
+[Minute 10]
+rps=10.55
+
+[Minute 11]
+rps=22.98
+
+[Minute 12]
+rps=21.92
+
+[Minute 13]
+rps=28.35
+
+[Minute 14]
+rps=37.08
+
+[Minute 15]
+rps=47.35
+
+[Load Generator]
+username=null
+platform=AWS
+instanceId=i-08315a4c8f7ff2f86
+instanceType=m5.large
+hostname=ec2-3-85-233-16.compute-1.amazonaws.com
+
+[Elastic Load Balancer]
+dns=load-balancer-101050853.us-east-1.elb.amazonaws.com
+
+[Test finished]

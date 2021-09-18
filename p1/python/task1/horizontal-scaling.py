@@ -27,6 +27,8 @@ KEY_NAME = os.getenv("KEY_NAME")
 SUBMISSION_USERNAME = os.environ['SUBMISSION_USERNAME']
 SUBMISSION_PASSWORD = os.environ['SUBMISSION_PASSWORD']
 
+#instance id record
+INSTANCE_IDS = []
 ########################################
 # Tags
 ########################################
@@ -54,30 +56,32 @@ def create_instance(ami, sg_name):
     # TODO: Create an EC2 instance
     # Wait for the instance to enter the running state
     # Reload the instance attributes
-
-    try:
-        instance = ec2.create_instances(
-        ImageId=ami,
-        InstanceType=INSTANCE_TYPE,
-        KeyName=KEY_NAME,
-        MaxCount=1,
-        MinCount=1,
-        SecurityGroupIds=[
-            sg_name,
-        ],
-        TagSpecifications=[{
-            'ResourceType': 'instance',
-            'Tags': TAGS
-        }, {
-            'ResourceType': 'volume',
-            'Tags': TAGS
-        }]
-        )[0]
-        instance.wait_until_running()
-        instance.reload()
-        print(instance.state)
-    except ClientError as e:
-        print(e)
+    while instance == None:
+        try:
+            instance = ec2.create_instances(
+            ImageId=ami,
+            InstanceType=INSTANCE_TYPE,
+            KeyName=KEY_NAME,
+            MaxCount=1,
+            MinCount=1,
+            SecurityGroupIds=[
+                sg_name,
+            ],
+            TagSpecifications=[{
+                'ResourceType': 'instance',
+                'Tags': TAGS
+            }, {
+                'ResourceType': 'volume',
+                'Tags': TAGS
+            }]
+            )[0]
+            # Wait for the instance to enter the running state
+            instance.wait_until_running()
+            # Reload the instance attributes
+            instance.reload()
+            print(instance.state)
+        except ClientError as e:
+            print(e)
 
     return instance
 
@@ -90,19 +94,18 @@ def initialize_test(lg_dns, first_web_service_dns):
     :return: Log file name
     """
 
-
     add_ws_string = 'http://{}/test/horizontal?dns={}'.format(
         lg_dns, first_web_service_dns
     )
     response = None
     while not response or response.status_code != 200:
         try:
-            response = requests.get(add_ws_string)
-        except requests.exceptions.ConnectionError:
+            response = requests.get(add_ws_string, timeout = 5)
+        except requests.exceptions.RequestException as e:
+            print(e)
             time.sleep(1)
-            pass 
 
-    # TODO: return log File name
+    #  return log File name
     return get_test_id(response)
 
 
@@ -143,14 +146,13 @@ def is_test_complete(lg_dns, log_name):
     response = None
     while not response or response.status_code != 200:
         try:
-            response = requests.get(log_string)
+            response = requests.get(log_string, timeout = 5)
             log_text = response.text
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.RequestException as e:
+            print(e)
             time.sleep(1)
-            pass 
     f.write(log_text)
     f.close()
-
     return '[Test finished]' in log_text
 
 
@@ -166,20 +168,23 @@ def add_web_service_instance(lg_dns, sg2_id, log_name):
         ins.instance_id,
         ins.public_dns_name)
     )
+    INSTANCE_IDS.append(ins.instance_id)
+
     add_req = 'http://{}/test/horizontal/add?dns={}'.format(
         lg_dns,
         ins.public_dns_name
     )
     while True:
         try:
-            if requests.get(add_req).status_code == 200:
+            if requests.get(add_req, timeout = 5).status_code == 200:
                 print("New WS submitted to LG.")
                 break
             elif is_test_complete(lg_dns, log_name):
                 print("New WS not submitted because test already completed.")
                 break
-        except requests.exceptions.ConnectionError:
-            pass
+        except requests.exceptions.RequestException as e:
+            print(e)
+            time.sleep(1)
 
 
 def authenticate(lg_dns, submission_password, submission_username):
@@ -197,10 +202,11 @@ def authenticate(lg_dns, submission_password, submission_username):
     response = None
     while not response or response.status_code != 200:
         try:
-            response = requests.get(authenticate_string)
+            response = requests.get(authenticate_string, timeout = 5)
             break
-        except requests.exceptions.ConnectionError:
-            pass
+        except requests.exceptions.RequestException as e:
+            print(e)
+            time.sleep(1)
 
 
 def get_rps(lg_dns, log_name):
@@ -213,15 +219,19 @@ def get_rps(lg_dns, log_name):
 
     log_string = 'http://{}/log?name={}'.format(lg_dns, log_name)
     config = configparser.ConfigParser(strict=False)
-    config.read_string(requests.get(log_string).text)
-    sections = config.sections()
-    sections.reverse()
-    rps = 0
-    for sec in sections:
-        print(sec)
-        if 'Current rps=' in sec:
-            rps = float(sec[len('Current rps='):])
-            break
+    rps = -1
+    while rps == -1:
+        try:
+            config.read_string(requests.get(log_string, timeout = 5).text)
+            sections = config.sections()
+            sections.reverse()
+            for sec in sections:
+                if 'Current rps=' in sec:
+                    rps = float(sec[len('Current rps='):])
+                    break
+        except requests.exceptions.RequestException as e:
+            print(e)
+            time.sleep(0.5)
     return rps
 
 
@@ -252,6 +262,12 @@ def get_security_groups(ec2_client):
     return
 
 def create_security_group(group_name, sg_permissions,ec2_client):
+    """
+    Return security_group
+    :param security_group: group name
+    :param sg_permissions: permission of security_grou
+    :return: security_group response
+    """
     response = ec2_client.describe_vpcs()
     vpc_id = response.get('Vpcs', [{}])[0].get('VpcId', '')
     data = None
@@ -270,7 +286,41 @@ def create_security_group(group_name, sg_permissions,ec2_client):
         print(e)
     return data
 
+def destory_instance():
+    """
+    use the global instance id record to destory created instance
+    :return: None
+    """
+    client = boto3.client('ec2')
+    try:
+        response = client.terminate_instances(
+            InstanceIds=INSTANCE_IDS,
+            DryRun=False
+        )
+    except ClientError as e:
+        print(e)
+    return
 
+def delete_security_group(GroupIds):
+    """
+    Given security_group ids, destory them
+    :param GroupIds: security_group ids
+    :return: None
+    """
+    client = boto3.client('ec2')
+    while len(GroupIds) != 0:
+        GroupId = GroupIds[0]
+        response = None
+        try:
+            response = client.delete_security_group(
+                GroupId=GroupId,
+            )
+        except ClientError as e:
+            print(e)
+            time.sleep(1)
+        if response != None:
+            GroupIds = GroupIds[1:]
+    return
 
 ########################################
 # Main routine
@@ -298,58 +348,59 @@ def main():
          }
     ]
     
-    # TODO: Create two separate security groups and obtain the group ids
+    #Create two separate security groups and obtain the group ids
     data1 = create_security_group("sg1"+str(time.time()), sg_permissions, ec2_client)
     sg1_id = data1['SecurityGroupRules'][0]['GroupId']  # Security group for Load Generator instances
-    print("sg1_id : "+sg1_id)
+
     data2 = create_security_group("sg2"+str(time.time()), sg_permissions, ec2_client)
     sg2_id = data2['SecurityGroupRules'][0]['GroupId']  # Security group for Web Service instances
 
     print_section('2 - create LG')
 
     response = ec2_client.describe_instances()# current instance info
-    print(response)
 
-    # TODO: Create Load Generator instance and obtain ID and DNS
+    #Create Load Generator instance and obtain ID and DNS
     
     instance = create_instance(LOAD_GENERATOR_AMI, sg1_id)
-    print(instance)
     lg = instance
     lg_id = lg.id
     lg_dns = lg.public_dns_name
     print("Load Generator running: id={} dns={}".format(lg_id, lg_dns))
+    #append the lg to resource, convenient to destory 
+    INSTANCE_IDS.append(lg_id)
 
     print_section('3. Authenticate with the load generator')
     authenticate(lg_dns, SUBMISSION_PASSWORD, SUBMISSION_USERNAME)
 
-    # TODO: Create First Web Service Instance and obtain the DNS
+    #Create First Web Service Instance and obtain the DNS
     instance = create_instance(WEB_SERVICE_AMI, sg2_id)
     web_service_dns = instance.public_dns_name
     last_time = time.time()
+    #append the lg to resource, convenient to destory 
+    INSTANCE_IDS.append(instance.id)
+
     print_section('4. Submit the first WS instance DNS to LG, starting test.')
     log_name = initialize_test(lg_dns, web_service_dns)
-    print(log_name)
+
     last_launch_time = get_test_start_time(lg_dns, log_name)
     while not is_test_complete(lg_dns, log_name):
-        # TODO: Check RPS and last launch time
-        # TODO: Add New Web Service Instance if Required
+        # Check RPS and last launch time
+        # Add New Web Service Instance if Required
         rps = get_rps(lg_dns, log_name)
-        cur_time = time.time()
-        if rps != 0:
-            print("rps : " + str(rps))
-        if cur_time - last_time > 100 and rps != 0 :
+        time_gap = time.time() - last_time
+        # if the time gap is larger than 100 seconds and rps < 50, start a new web server
+        if time_gap > 100 and rps != 0 :
             if rps < 50:
-                last_time = cur_time
                 add_web_service_instance(lg_dns, sg2_id, log_name)
+                last_time = time.time()
         else:
             continue
         time.sleep(1)
 
     print_section('End Test')
-#
-    ## TODO: Terminate Resources
-
+    ## Terminate Resources
+    destory_instance()
+    delete_security_group([sg1_id,sg2_id])
 
 if __name__ == '__main__':
     main()
-    pass

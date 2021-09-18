@@ -38,9 +38,6 @@ ALARM_EVALUATION_PERIODS_SCALE_IN = configuration['alarm_evaluation_periods_scal
 SUBMISSION_USERNAME = os.environ['SUBMISSION_USERNAME']
 SUBMISSION_PASSWORD = os.environ['SUBMISSION_PASSWORD']
 KEY_NAME = os.getenv("KEY_NAME")
-
-#instance id record
-INSTANCE_IDS = []
 ########################################
 # Tags
 ########################################
@@ -56,12 +53,6 @@ TEST_NAME_REGEX = r'name=(.*log)'
 ########################################
 
 def create_security_group(group_name, sg_permissions,ec2_client):
-    """
-    Return security_group
-    :param security_group: group name
-    :param sg_permissions: permission of security_grou
-    :return: security_group response
-    """
     response = ec2_client.describe_vpcs()
     vpc_id = response.get('Vpcs', [{}])[0].get('VpcId', '')
     data = None
@@ -81,24 +72,15 @@ def create_security_group(group_name, sg_permissions,ec2_client):
     return data
 
 def delete_security_group(GroupIds):
-    """
-    Given security_group ids, destory them
-    :param GroupIds: security_group ids
-    :return: None
-    """
     client = boto3.client('ec2')
-    while len(GroupIds) != 0:
-        GroupId = GroupIds[0]
-        response = None
-        try:
+    try:
+        for GroupId in GroupIds:
             response = client.delete_security_group(
                 GroupId=GroupId,
             )
-        except ClientError as e:
-            print(e)
-            time.sleep(1)
-        if response != None:
-            GroupIds = GroupIds[1:]
+    except ClientError as e:
+        print(e)
+        return 
     return
 
 def create_instance(ami, sg_name):
@@ -142,9 +124,10 @@ def create_instance(ami, sg_name):
 
 def destory_instance(InstanceIds):
     """
-    use the instance id record to destory created instance
-    :param InstanceIds: InstanceIds
-    :return: None
+    Given AMI, create and return an AWS EC2 instance object
+    :param ami: AMI image name to launch the instance with
+    :param sg_name: name of the security group to be attached to instance
+    :return: instance object
     """
     client = boto3.client('ec2')
     # TODO: delete an EC2 instance
@@ -180,6 +163,7 @@ def initialize_test(load_generator_dns, first_web_service_dns):
         except requests.exceptions.RequestException as e:
             print(e)
             time.sleep(1)
+            pass 
 
     # TODO: return log File name
     return get_test_id(response)
@@ -203,6 +187,7 @@ def initialize_warmup(load_generator_dns, load_balancer_dns):
         except requests.exceptions.RequestException as e:
             print(e)
             time.sleep(1)
+            pass  
     print(response)
     # TODO: return log File name
     return get_test_id(response)
@@ -224,20 +209,15 @@ def get_test_id(response):
 def destroy_resources(LoadBalancerArn, ListenerArn, TargetGroupArn):
     """
     Delete all resources created for this task
-    :param LoadBalancerArn: LoadBalancerArn
-    :param ListenerArn: ListenerArn
-    :param TargetGroupArn: TargetGroupArn
+    :param msg: message
     :return: None
     """
+    # TODO: implement this method
     destroy_ASG()
     destroy_ELB(LoadBalancerArn, ListenerArn, TargetGroupArn)
-    return
+    pass
 
 def destroy_ASG():
-    """
-    Delete autoscaling group created for this task
-    :return: None
-    """
     client = boto3.client('autoscaling')
     response = None
     try : 
@@ -254,13 +234,6 @@ def destroy_ASG():
     return response
 
 def destroy_ELB(LoadBalancerArn, ListenerArn, TargetGroupArn):
-    """
-    Delete ELB created for this task
-    :param LoadBalancerArn: LoadBalancerArn
-    :param ListenerArn: ListenerArn
-    :param TargetGroupArn: TargetGroupArn
-    :return: None
-    """
     client = boto3.client('elbv2')
     response = None
     try : 
@@ -289,7 +262,7 @@ def print_section(msg):
 
 def is_test_complete(lg_dns, log_name):
     """
-    Check if the auto scaling test has finished
+    Check if the horizontal scaling test has finished
     :param lg_dns: load generator DNS
     :param log_name: name of the log file
     :return: True if Horizontal Scaling test is complete and False otherwise.
@@ -307,8 +280,10 @@ def is_test_complete(lg_dns, log_name):
         except requests.exceptions.RequestException as e:
             print(e)
             time.sleep(1)
+            pass 
     f.write(log_text)
     f.close()
+
     return '[Test finished]' in log_text
 #def is_test_complete(load_generator_dns, log_name):
 #    """
@@ -346,14 +321,14 @@ def authenticate(load_generator_dns, submission_password, submission_username):
             break
         except requests.exceptions.RequestException as e:
             print(e)
-            time.sleep(1)
+            pass
 
 def create_launch_configuration(as_client, sg_name):
     """
     create launch configuration
     :param as_client: autoscaling client
     :param sg_name: name of the security group to be attached to instance
-    :return: launch configuration object
+    :return: None
     """
     response = None
     try:
@@ -375,11 +350,6 @@ def create_launch_configuration(as_client, sg_name):
     return response
 
 def create_target_group(ec2_client):
-    """
-    create target_group
-    :param ec2_client: ec2_client
-    :return: target group object
-    """
     response = ec2_client.describe_vpcs()
     vpc_id = response.get('Vpcs', [{}])[0].get('VpcId', '')
 
@@ -419,17 +389,9 @@ def test_create_target_group():
     print(tg_arn)
 
 def create_load_balancer(ec2_client,sg_name):
-    """
-    create loadbalancer
-    :param ec2_client: ec2_client
-    :param sg_name: security group name
-    :return:load balancer object
-    """
+
     #get subnet ids
-    try:
-        response = ec2_client.describe_subnets()
-    except ClientError as e:
-        print(e)
+    response = ec2_client.describe_subnets()
     target_subnets = ['us-east-1a','us-east-1b']
     subnet_infos = response.get('Subnets', [{}])
     subnet_ids = []
@@ -452,6 +414,7 @@ def create_load_balancer(ec2_client,sg_name):
         )
     except ClientError as e:
         print(e)
+
     return response
 
 def test_create_load_balancer():
@@ -518,20 +481,8 @@ def test_create_listener():
     print(lsn_arn)
 
 def create_auto_scaling_group(ec2_client, tg_arn):
-    """
-    create auto scaling group
-    :param ec2_client: ec2_client
-    :param tg_arn: target group arn
-    :return:auto scaling group object
-    """
     #get subnet ids
-    response = None
-    while response == None:
-        try:
-            response = ec2_client.describe_subnets()
-        except ClientError as e:
-            print(e)
-            time.sleep(1)
+    response = ec2_client.describe_subnets()
     target_subnets = ['us-east-1a','us-east-1b']
     subnet_infos = response.get('Subnets', [{}])
     subnet_ids = []
@@ -579,10 +530,6 @@ def test_create_auto_scaling_group():
     print(res)
 
 def put_scaling_out_policy():
-    """
-    create scaling out policy
-    :return:scaling out policy object
-    """
     client = boto3.client('autoscaling')
     response = None
     try:
@@ -605,10 +552,6 @@ def put_scaling_out_policy():
     return response
 
 def put_scaling_in_policy():
-    """
-    create scaling in policy
-    :return:scaling in policy object
-    """
     client = boto3.client('autoscaling')
     response = None
     try:
@@ -636,11 +579,6 @@ def test_put_scaling_policy():
     print(res)
 
 def create_scale_out_alarm(policy_arn):
-    """
-    create cloudwatch scale out alarm
-    :param policy_arn: scale out policy arn
-    :return:cloudwatch alarm object
-    """
     client = boto3.client('cloudwatch')
     response = None
     try:
@@ -665,11 +603,6 @@ def create_scale_out_alarm(policy_arn):
         print(e)
     return response
 def create_scale_in_alarm(policy_arn):
-    """
-    create cloudwatch scale in alarm
-    :param policy_arn: scale in policy arn
-    :return:cloudwatch alarm object
-    """
     client = boto3.client('cloudwatch')
     response = None
     try:
